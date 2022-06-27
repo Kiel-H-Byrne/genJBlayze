@@ -38,7 +38,7 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState("")
   const [artworkLayers, setArtworkLayers] = useState([])
   const [varietyMetadata, setVarietyMetadata] = useState([] as IVarietyLeaf[][])
-  const [metadata, setMetaData] = useState({} as Partial<ILayerData>)
+  const [metadata, setMetaData] = useState({} as ILayerData)
   const [fuzzNum, setFuzzNum] = useState(0)
 
   const onClickUpload = async () => {
@@ -47,7 +47,7 @@ function App() {
       const imageUrl = await storeImage(userArtwork)
       setUploadStatus("UPLOADING DOCUMENT....")
       const _id = await updateArtworkSet({ imageUrl })
-      const metadata: Partial<IUploadedImage> = {
+      const metadata: IUploadedImage = {
         _id,
         imageUrl,
         fuzz: `${fuzzNum}%`,
@@ -81,7 +81,7 @@ function App() {
     imageUrl,
     fuzz,
     numDominantColorsToExtract,
-  }: Partial<IUploadedImage>) => {
+  }: IUploadedImage) => {
     // post image to url, get response back,
     // response is array of images and metadata
     // Example POST method implementation:
@@ -138,8 +138,8 @@ function App() {
      * object with layer information.
      * can change shape to array here
      */
-    const layerData: Partial<ILayerData> = response.urls.reduce(
-      (obj: any, url: string, i: number) => {
+    const layerData: ILayerData = response.urls.reduce(
+      (obj: ILayerData, url: string, i: number) => {
         obj[response.dominantColors[i].hexCode] = {
           _id: nanoid(),
           _ogid: response.id,
@@ -190,7 +190,7 @@ function App() {
       })
       .then((data) => data)
       .catch((err) => {
-        setErrorMsg("Error Creating Layers: " + err.message)
+        setErrorMsg("Error Creating Layers: " + err)
         console.error("error", err)
       })) as IVarietyLeaf[][]
 
@@ -200,7 +200,7 @@ function App() {
     //response is an array or array of varieties, each with an array of varieties per layer
     response?.forEach((layer) => {
       const colorIndex = layer[0].origColorCode
-      metadata[colorIndex]!.varieties = {
+      metadata[colorIndex].varieties = {
         [layer[0].newColorCode]: layer,
       }
     })
@@ -277,7 +277,7 @@ function App() {
                   onChange={(e) => {
                     const newMeta = metadata
                     Object.entries(newMeta).forEach((iteration) => {
-                      newMeta[iteration[0]]!.colorVariety = Number(
+                      newMeta[iteration[0]].colorVariety = Number(
                         e.currentTarget.value,
                       )
                     })
@@ -300,8 +300,8 @@ function App() {
                 overflowX="scroll"
                 width="100vw"
               >
-                {varietyMetadata?.map((layer: any) =>
-                  layer.map((variety: any) => (
+                {varietyMetadata?.map((layer: IVarietyLeaf[]) =>
+                  layer.map((variety) => (
                     <GridItem
                       key={`${variety.imageUri}_${variety.origColorCode}_${variety.newColorCode}`}
                     >

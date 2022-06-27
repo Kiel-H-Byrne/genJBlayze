@@ -7,13 +7,24 @@
 import { getDownloadURL, ref, uploadString } from "firebase/storage"
 import { fbStorage } from "../../../components/db/firebase"
 import { ILayerData } from "../../../components/types"
-import { getFileName } from "../../../components/utils"
+import {
+  allowCors,
+  getFileName,
+  getRandomRGBA,
+  isDev,
+  snakeCaseRGB,
+} from "../../../components/utils"
 import { convert } from "imagemagick"
 import { NextApiRequest, NextApiResponse } from "next"
 import { nanoid } from "nanoid"
 import { promisify } from "util"
+import { cwd } from "process"
+import { join, resolve } from "path"
+import { readFileSync } from "fs"
 
 const maxAge = 1 * 24 * 60 * 60
+const IM_TMP_PATH = isDev() ? "convert" : join(cwd(), "gallery")
+console.log(join(cwd(), "gallery"))
 const konvert = promisify(convert)
 /**
  *
@@ -37,19 +48,7 @@ const randomizeLayersHandler = async (
     body,
     method,
   } = req
-  // const getRandomHexColor = () =>
-  //   Math.floor(Math.random() * 16777215)
-  //     .toString(16)
-  //     .toUpperCase()
-  const getRandomRGBA = () => {
-    const getNum = () => Math.floor(Math.random() * 256)
-    const getOpacity = () =>
-      (Math.floor(Math.random() * (100 - 50 + 1) + 50) / 100).toPrecision(2) //btwn .5-1
-    return `rgba(${getNum()},${getNum()},${getNum()},${getOpacity()})`
-  }
-  // const fileRoot = path.join(process.cwd(), "tmp/")
-  const snakeCaseRGB = (color: string): string =>
-    color.slice(0, -1).replace(/[(,.]/g, "_")
+
   /**
    *   '000000': {
    _id: 'nMLLdR6mjLAnDO-sxQtu-',
@@ -62,11 +61,12 @@ const randomizeLayersHandler = async (
   // let newobj = {}
   switch (method) {
     case "POST":
-      // take each uri and convert them x times
       if (!body) return res.status(400).send("You must write something")
-      // need a promise.all array here
+      convert.path = IM_TMP_PATH
+      console.log("inside im path", convert.path)
+      // take each uri and convert them x times
       randomizedUris = Promise.all(
-        Object.entries(body as ILayerData).map(async function (item, i) {
+        Object.entries(body as ILayerData).map(async function (item) {
           const colorCode = item[0]
           const { imageUri, colorVariety, _rid } = item[1]
 
@@ -74,15 +74,13 @@ const randomizeLayersHandler = async (
             Array.from(Array(colorVariety)).map(async () => {
               const randomColor = getRandomRGBA()
               const snakedColor = snakeCaseRGB(randomColor)
-              const filePath =
-                imageUri &&
-                `${getFileName(
-                  imageUri,
-                )}_${colorCode}-${snakedColor}_${i}_of_${colorVariety}.png`
+              const fileName = `${getFileName(
+                imageUri,
+              )}_${colorCode}-${snakedColor}.png`
               const uploadImage = async (binaryString: BinaryType) => {
                 const storageRef = ref(
                   fbStorage,
-                  `/uploads/${_rid}/${filePath}`,
+                  `/uploads/${_rid}/${fileName}`,
                 )
                 if (binaryString) {
                   const bufString = Buffer.from(
@@ -94,7 +92,7 @@ const randomizeLayersHandler = async (
                   })
                   return await getDownloadURL(storageRef)
                 } else {
-                  console.log(filePath)
+                  console.log(fileName)
                   // read file and upload?
                   // uploadBytes(storageRef, filePath)
                 }
@@ -118,6 +116,7 @@ const randomizeLayersHandler = async (
                 }))
               } catch (error) {
                 console.error("APP ERROR: Konvert failure" + error)
+                return error
               }
             }),
           )
@@ -175,4 +174,4 @@ const randomizeLayersHandler = async (
 // await spawn("convert", [tempFilePath, "-white-threshold", "90%", "-transparent", "white", "-fill", colorSubstitution, "-opaque", "black", tempFilePath + ".png"]);
 // await spawn("convert", [tempFilePath, "-white-threshold", "90%", "-black-threshold", "90%", "-transparent", "white", "-fill", vinylColor?.designColor?.hexColor, "-opaque", "black", tempFilePath + ".png"]);
 
-export default randomizeLayersHandler
+export default allowCors(randomizeLayersHandler)
