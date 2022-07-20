@@ -38,7 +38,7 @@ function App() {
   const [uploadStatus, setUploadStatus] = useState("")
   const [artworkLayers, setArtworkLayers] = useState([])
   const [varietyMetadata, setVarietyMetadata] = useState([] as IVarietyLeaf[][])
-  const [metadata, setMetaData] = useState({} as Partial<ILayerData>)
+  const [metadata, setMetaData] = useState({} as ILayerData)
   const [fuzzNum, setFuzzNum] = useState(0)
 
   const onClickUpload = async () => {
@@ -47,7 +47,7 @@ function App() {
       const imageUrl = await storeImage(userArtwork)
       setUploadStatus("UPLOADING DOCUMENT....")
       const _id = await updateArtworkSet({ imageUrl })
-      const metadata: Partial<IUploadedImage> = {
+      const metadata: IUploadedImage = {
         _id,
         imageUrl,
         fuzz: `${fuzzNum}%`,
@@ -81,7 +81,7 @@ function App() {
     imageUrl,
     fuzz,
     numDominantColorsToExtract,
-  }: Partial<IUploadedImage>) => {
+  }: IUploadedImage) => {
     // post image to url, get response back,
     // response is array of images and metadata
     // Example POST method implementation:
@@ -138,8 +138,8 @@ function App() {
      * object with layer information.
      * can change shape to array here
      */
-    const layerData: Partial<ILayerData> = response.urls.reduce(
-      (obj: any, url: string, i: number) => {
+    const layerData: ILayerData = response.urls.reduce(
+      (obj: ILayerData, url: string, i: number) => {
         obj[response.dominantColors[i].hexCode] = {
           _id: nanoid(),
           _ogid: response.id,
@@ -182,33 +182,37 @@ function App() {
       body: JSON.stringify(metadata), // body data type must match "Content-Type" header
     })
       .then((resp) => {
+        setUploadStatus("RANDOMIZING LAYERS....")
         if (!resp.ok) {
           return resp.text().then((result) => Promise.reject(new Error(result)))
         }
-        setUploadStatus("RANDOMIZING LAYERS....")
         return resp.json()
       })
       .then((data) => data)
       .catch((err) => {
-        setErrorMsg("Error Creating Layers: " + err.message)
+        setErrorMsg("Error Creating Layers: " + err)
         console.error("error", err)
       })) as IVarietyLeaf[][]
 
     console.info("::-RANDOMIZATION RESPONSE-::")
     console.log(response)
-    response?.length > 0 && setVarietyMetadata(response)
-    //response is an array or array of varieties, each with an array of varieties per layer
-    response?.forEach((layer) => {
-      const colorIndex = layer[0].origColorCode
-      metadata[colorIndex]!.varieties = {
-        [layer[0].newColorCode]: layer,
-      }
-    })
-    //can i upload new stuff to layers and have it merge, or willi t overwrite layers:
-    updateArtworkSet({ _id: projectId, layers: metadata }) // use swr here
+    if (response.length > 0 && !response[0]) {
+      //response is an array or array of varieties, each with an array of varieties per layer
+      response?.forEach((layer) => {
+        const colorIndex = layer[0]?.origColorCode
+        metadata[colorIndex].varieties = {
+          [layer[0]?.newColorCode]: layer,
+        }
+      })
+      //can i upload new stuff to layers and have it merge, or willi t overwrite layers:
+      updateArtworkSet({ _id: projectId, layers: metadata }) // use swr here
 
-    //check status and get URLs for randomized images, then upload to db, display results in view?
-    // then generate random images from layerImages
+      //check status and get URLs for randomized images, then upload to db, display results in view?
+      // then generate random images from layerImages
+    } else {
+      console.warn("ISSUE WITH RESPONSE")
+    }
+    response?.length > 0 && setVarietyMetadata(response)
   }
   return (
     <Box className="App">
@@ -236,7 +240,7 @@ function App() {
                   type="number"
                   min={0}
                   max={100}
-                  step={10}
+                  step={5}
                   onChange={(ev) => setFuzzNum(Number(ev.target.value))}
                 />
                 <br />
@@ -273,11 +277,12 @@ function App() {
                 <FormLabel># of Colors</FormLabel>
                 <Input
                   type="number"
+                  placeholder={"1"}
                   min={1}
                   onChange={(e) => {
                     const newMeta = metadata
                     Object.entries(newMeta).forEach((iteration) => {
-                      newMeta[iteration[0]]!.colorVariety = Number(
+                      newMeta[iteration[0]].colorVariety = Number(
                         e.currentTarget.value,
                       )
                     })
@@ -300,14 +305,18 @@ function App() {
                 overflowX="scroll"
                 width="100vw"
               >
-                {varietyMetadata?.map((layer: any) =>
-                  layer.map((variety: any) => (
-                    <GridItem
-                      key={`${variety.imageUri}_${variety.origColorCode}_${variety.newColorCode}`}
-                    >
-                      <Image src={variety.imageUri} alt="Layer Image" />
-                    </GridItem>
-                  )),
+                {varietyMetadata?.map((layer: IVarietyLeaf[]) =>
+                  layer.map((variety) =>
+                    !variety ? (
+                      <Text>An Error has occurred...</Text>
+                    ) : (
+                      <GridItem
+                        key={`${variety.imageUri}_${variety.origColorCode}_${variety.newColorCode}`}
+                      >
+                        <Image src={variety.imageUri} alt="Layer Image" />
+                      </GridItem>
+                    ),
+                  ),
                 )}
               </Grid>
             )}

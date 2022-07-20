@@ -4,17 +4,63 @@
 // run generate commands with params
 // upload images to store and return urls to all images
 
-import { getDownloadURL, ref, uploadString } from "firebase/storage"
+import {
+  getDownloadURL,
+  ref,
+  uploadBytes,
+  uploadString,
+} from "firebase/storage"
 import { fbStorage } from "../../../components/db/firebase"
 import { ILayerData } from "../../../components/types"
-import { getFileName } from "../../../components/utils"
+import {
+  allowCors,
+  getFileName,
+  getRandomRGBA,
+  isDev,
+  snakeCaseRGB,
+} from "../../../components/utils"
 import { convert } from "imagemagick"
 import { NextApiRequest, NextApiResponse } from "next"
 import { nanoid } from "nanoid"
 import { promisify } from "util"
+import { cwd } from "process"
+import { join, resolve } from "path"
+import { readFile, readFileSync } from "fs"
 
 const maxAge = 1 * 24 * 60 * 60
 const konvert = promisify(convert)
+
+interface ImageData {
+  _id: string
+  origColorCode: string
+  newColorCode: string
+  imageUri: string | undefined
+}
+const uploadImage = async ({
+  binaryString,
+  filePath,
+  id,
+}: {
+  binaryString?: BinaryType
+  filePath: string
+  id: string
+}) => {
+  const fileName = getFileName(filePath)
+  console.log(fileName)
+  const storageRef = ref(fbStorage, `/uploads/${id}/${fileName}`)
+  if (binaryString) {
+    const bufString = Buffer.from(binaryString, "binary").toString("base64")
+    await uploadString(storageRef, bufString, "base64", {
+      contentType: "image/png",
+    })
+    return await getDownloadURL(storageRef)
+  } else {
+    console.log(fileName)
+    // read file and upload?
+    readFile(filePath, (err, file) => uploadBytes(storageRef, file))
+  }
+}
+
 /**
  *
  * Takes an array of image urls and applies imagemagick transformations to each, before uploading them to Storage
@@ -36,22 +82,12 @@ const randomizeLayersHandler = async (
     //can send query params to sort & limit results
     body,
     method,
+    query,
   } = req
-  // const getRandomHexColor = () =>
-  //   Math.floor(Math.random() * 16777215)
-  //     .toString(16)
-  //     .toUpperCase()
-  const getRandomRGBA = () => {
-    const getNum = () => Math.floor(Math.random() * 256)
-    const getOpacity = () =>
-      (Math.floor(Math.random() * (100 - 50 + 1) + 50) / 100).toPrecision(2) //btwn .5-1
-    return `rgba(${getNum()},${getNum()},${getNum()},${getOpacity()})`
-  }
-  // const fileRoot = path.join(process.cwd(), "tmp/")
-  const snakeCaseRGB = (color: string): string =>
-    color.slice(0, -1).replace(/[(,.]/g, "_")
+
   /**
-   *   '000000': {
+   *   
+   '000000': {
    _id: 'nMLLdR6mjLAnDO-sxQtu-',
    depthNumber: 0,
    imageUri: 'https://storage.googleapis.com/shop-mocknstock.appspot.com/43ce5167-a478-4bc8-97ce-18dfa661e5bc.png-000000.png',
@@ -59,45 +95,35 @@ const randomizeLayersHandler = async (
   }
   */
   let randomizedUris = []
-  // let newobj = {}
+
+  const IS_DEV = isDev()
+  const IM_TMP_PATH = IS_DEV ? "convert" : join(cwd(), "tmp")
+  let outputPath = "-"
+  const { format } = query
+
+  // const imageURIs: ImageData[] = []
   switch (method) {
     case "POST":
-      // take each uri and convert them x times
       if (!body) return res.status(400).send("You must write something")
-      // need a promise.all array here
+      convert.path = IM_TMP_PATH
+      console.log("inside im path", convert.path)
+      // take each uri and convert them x times
       randomizedUris = Promise.all(
-        Object.entries(body as ILayerData).map(async function (item, i) {
+        Object.entries(body as ILayerData).map(async function (item) {
           const colorCode = item[0]
           const { imageUri, colorVariety, _rid } = item[1]
-
+          if (format == "file") {
+            outputPath = IM_TMP_PATH
+          }
           return await Promise.all(
             Array.from(Array(colorVariety)).map(async () => {
               const randomColor = getRandomRGBA()
               const snakedColor = snakeCaseRGB(randomColor)
-              const filePath =
-                imageUri &&
-                `${getFileName(
-                  imageUri,
-                )}_${colorCode}-${snakedColor}_${i}_of_${colorVariety}.png`
-              const uploadImage = async (binaryString: BinaryType) => {
-                const storageRef = ref(
-                  fbStorage,
-                  `/uploads/${_rid}/${filePath}`,
-                )
-                if (binaryString) {
-                  const bufString = Buffer.from(
-                    binaryString,
-                    "binary",
-                  ).toString("base64")
-                  await uploadString(storageRef, bufString, "base64", {
-                    contentType: "image/png",
-                  })
-                  return await getDownloadURL(storageRef)
-                } else {
-                  console.log(filePath)
-                  // read file and upload?
-                  // uploadBytes(storageRef, filePath)
-                }
+              const fileName = `${getFileName(
+                imageUri,
+              )}_${colorCode}-${snakedColor}.png`
+              if (format == "file") {
+                outputPath += `/${fileName}`
               }
               try {
                 return await konvert([
@@ -108,16 +134,29 @@ const randomizeLayersHandler = async (
                   randomColor,
                   "-opaque",
                   "#" + colorCode,
-                  // filePath, // creates a file
-                  "-", // use stdout
-                ]).then(async (binString) => ({
-                  _id: nanoid(),
-                  origColorCode: colorCode,
-                  newColorCode: snakedColor,
-                  imageUri: await uploadImage(binString as BinaryType),
-                }))
+                  outputPath,
+                ]).then(async (binString) => {
+                  // if (err) console.log("ERR: " + err.message)
+                  const imageUri = await uploadImage({
+                    binaryString: binString as BinaryType,
+                    id: _rid,
+                    filePath:
+                      format !== "file" && outputPath == "-"
+                        ? fileName
+                        : outputPath,
+                  })
+                  const imageData = {
+                    _id: nanoid(),
+                    origColorCode: colorCode,
+                    newColorCode: snakedColor,
+                    imageUri,
+                  }
+                  return imageData
+                  // imageURIs.push(imageData)
+                })
               } catch (error) {
-                console.error("APP ERROR: Konvert failure" + error)
+                console.error("APP ERROR: Konvert failure: " + error)
+                return error
               }
             }),
           )
@@ -175,4 +214,4 @@ const randomizeLayersHandler = async (
 // await spawn("convert", [tempFilePath, "-white-threshold", "90%", "-transparent", "white", "-fill", colorSubstitution, "-opaque", "black", tempFilePath + ".png"]);
 // await spawn("convert", [tempFilePath, "-white-threshold", "90%", "-black-threshold", "90%", "-transparent", "white", "-fill", vinylColor?.designColor?.hexColor, "-opaque", "black", tempFilePath + ".png"]);
 
-export default randomizeLayersHandler
+export default allowCors(randomizeLayersHandler)
